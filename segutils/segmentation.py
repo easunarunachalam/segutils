@@ -8,11 +8,13 @@ import pandas as pd
 from pathlib import Path
 
 from scipy.optimize import curve_fit
+from scipy.signal import butter, filtfilt
 
 from sklearn.ensemble import RandomForestClassifier
 from skimage.feature import multiscale_basic_features, peak_local_max
 from skimage.filters import gaussian, sobel, threshold_local, threshold_otsu
-from skimage.future import graph
+# from skimage.future import graph
+from skimage import graph
 from skimage.measure import find_contours, label, profile_line, regionprops_table
 from skimage.morphology import binary_erosion, disk, remove_small_objects
 from skimage.segmentation import watershed
@@ -166,60 +168,15 @@ def remove_overlapping_cells(labels, thickness, thickness_threshold=31, num_disc
 
     return pruned_labels
 
-def merge_buds(maxz_img, labels, linewidth=10, septin_threshold=150, gaussian_amp_threshold=20):
-    """
-    """
+def cell_thickness_from_otsu(im, seg, sigma=5):
+    is_cell = seg > 0
 
-    if len(np.unique(labels)) == 1:
-        return labels
-
-    new_labels = deepcopy(labels)
-
-    edge_map = sobel(labels)
-    rag = graph.rag_boundary(labels, edge_map)
-    rag.remove_node(0)
-
-    rprops = pd.DataFrame(regionprops_table(labels, properties=('label', "area", 'centroid', 'bbox'),))
-
-    cells_considered = []
-    for icell, jcell in list(rag.edges):
-
-        if (icell in cells_considered) or (jcell in cells_considered):
-            continue
-
-        intensity_profile = profile_line(
-            maxz_img,
-            rprops.loc[rprops["label"] == icell, ["centroid-0", "centroid-1"]].values.flatten(),
-            rprops.loc[rprops["label"] == jcell, ["centroid-0", "centroid-1"]].values.flatten(),
-            linewidth=linewidth
-        )
-
-        def func(x, a, b, c, d):
-            return a*np.exp(-((x-b)/c)**2) + d
-
-        xdata = np.arange(len(intensity_profile))
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                popt, pcov = curve_fit(func, xdata, intensity_profile)
-                lo_lim = popt[1] - 2*popt[2]
-                hi_lim = popt[1] + 2*popt[2]
-
-            profile_maxima = peak_local_max(intensity_profile, threshold_abs=septin_threshold).flatten()
-
-            if (len(profile_maxima) > 0) and ((lo_lim > 0) and (hi_lim < np.max(xdata)) and (popt[0] > gaussian_amp_threshold)): # and ~np.any(np.isnan(pcov))):
-                icell_area = rprops.loc[rprops["label"] == icell, "area"].values.flatten()
-                jcell_area = rprops.loc[rprops["label"] == jcell, "area"].values.flatten()
-                if icell_area > jcell_area:
-                    new_labels[new_labels==jcell] = icell
-                else:
-                    new_labels[new_labels==icell] = jcell
-                cells_considered.append(icell)
-                cells_considered.append(jcell)
-        except:
-            continue
-
-    return new_labels
+    im_blur_xy = np.array([gaussian(im_slice, sigma=[sigma,sigma], preserve_range=True) for im_slice in im])
+    im_binary = im_blur_xy >= threshold_otsu(im_blur_xy)
+    
+    thickness = np.sum(im_binary, axis=0)
+    
+    return im_blur_xy, thickness, np.multiply(thickness, is_cell)
 
 def cell_thickness(im, seg, sigma=5, bg_thresh=10):
     is_cell = seg > 0
@@ -305,56 +262,7 @@ def nb_calc_thickness(im, bg_thresh=20):
                 thick[iy,ix] = X[right_idx] - X[left_idx] #return the difference (full width)
     return thick
 
-def calculate_mito_shift(cyto_mask, mito_img, maxdxy=20, plot=False):
-    """
-    Given a cytoplasm mask and mitochondrial image, shift the mitochondrial image to minimize the amount of mitochondria outside the cytoplasmic mask.
 
-    (Lack of) overlap is calculated manually over the range of shifts [-maxdxy, maxdxy] in x and y, and the shift which minimizes this is selected.
-
-    This should be generally useful for registration of multiple channels where positive pixels in one are a strict subet of positive pixels in the other.
-
-    Returns:
-    mito_img_reg: shifted mito_img
-    (dx, dy): x and y shifts in pixels, which can then be applied to other images or volumes
-    """
-
-    mito_blur = gaussian(mito_img, sigma=1)
-
-    gridsearch_result = []
-
-    for dx in np.arange(-maxdxy, maxdxy+1):
-        for dy in np.arange(-maxdxy, maxdxy+1):
-            mito_blur_masked = np.roll(mito_blur, (dx, dy), axis=(0,1))
-            mito_blur_masked[cyto_mask] = 0
-            mitosum_outside_cellmask = np.sum(mito_blur_masked)
-            gridsearch_result.append([dx, dy, mitosum_outside_cellmask])
-
-    dx, dy, msocm = tuple(np.array(gridsearch_result).T)
-
-    dx_min = int(dx[np.argmin(msocm)])
-    dy_min = int(dy[np.argmin(msocm)])
-
-    mito_img_reg = np.roll(mito_img, (dx_min, dy_min), axis=(0,1))
-
-    if dx_min > 0:
-        mito_img_reg[:dx_min,:] = 0
-    if dy_min > 0:
-        mito_img_reg[:,:dy_min] = 0
-
-    if dx_min < 0:
-        mito_img_reg[dx_min:,:] = 0
-    if dy_min < 0:
-        mito_img_reg[:,dy_min:] = 0
-
-    if plot:
-        plt.scatter(dx, dy, c = msocm - np.min(msocm), marker="s")
-        plt.scatter(dx_min, dy_min, c="crimson", marker="s")
-        plt.xlabel("dx")
-        plt.ylabel("dy")
-        plt.gca().set_aspect(1)
-        plt.show()
-
-    return mito_img_reg, (dx_min, dy_min)
 
 def icellstack_mask_props(masks):
 
