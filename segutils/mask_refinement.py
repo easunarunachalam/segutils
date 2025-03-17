@@ -4,7 +4,9 @@ import pandas as pd
 from scipy.ndimage import distance_transform_edt
 from scipy.signal import butter, filtfilt, find_peaks
 from skimage.measure import profile, profile_line
-from tqdm.notebook import trange
+from tqdm.notebook import tqdm, trange
+
+import matplotlib.pyplot as plt
 
 import sys
 sys.path.append("D:/Dropbox/code/pyutils")
@@ -72,7 +74,9 @@ def pairwise_distances_bw_masks(masks, close_thresh=2):
 
     close_masks = []
     
-    for i in trange(n_labels, desc="pairwise distances", leave=False):
+    pbar = tqdm(total=(n_labels*(n_labels-1))/2, desc="pairwise distances", leave=False)
+
+    for i in range(n_labels):
         for j in range(i):
             
             lbl_j = labels[j]
@@ -104,6 +108,8 @@ def pairwise_distances_bw_masks(masks, close_thresh=2):
                 "mean_distance": np.mean(np.hstack((j_dists_from_i, i_dists_from_j))),
                 "num_close_px": np.sum(close_mask_ji) + np.sum(close_mask_ij)
             }
+
+            pbar.update(1)
     
     return df_pairwise_dists, close_masks
 
@@ -160,7 +166,7 @@ def subtract_low_pass(input_array, cutoff_freq, sample_rate):
     
     return result
 
-def merge_close_masks(orig_masks, intensity_image):
+def merge_close_masks(orig_masks, intensity_image, close_thresh=2):
     """
     Merges segmented regions in a mask based on intensity profile analysis along their shared border.
     
@@ -204,14 +210,14 @@ def merge_close_masks(orig_masks, intensity_image):
     """
     
 
-    df_pairwise_dists, close_masks = pairwise_distances_bw_masks(orig_masks)
+    df_pairwise_dists, close_masks = pairwise_distances_bw_masks(orig_masks, close_thresh=close_thresh)
     
     df_close_pairs = df_pairwise_dists.loc[df_pairwise_dists["num_close_px"] > 2]
     
     merged_masks = deepcopy(orig_masks)
     
     for i in df_close_pairs.index:
-    
+
         lbl_i = df_close_pairs.loc[i,"label_i"]
         lbl_j = df_close_pairs.loc[i,"label_j"]
     
@@ -253,7 +259,7 @@ def merge_close_masks(orig_masks, intensity_image):
         
         sum_intensity_profile = profile_line(intensity_image_ij_only, start_coord, end_coord, linewidth=profile_width, mode="constant", cval=0)
         sum_npx_profile = profile_line(intensity_image_ij_only > 0, start_coord, end_coord, linewidth=profile_width, mode="constant", cval=0)
-        
+
         valid_idx = sum_npx_profile != 0
         avg_intensity_profile = sum_intensity_profile[valid_idx] / sum_npx_profile[valid_idx]
 
@@ -262,12 +268,11 @@ def merge_close_masks(orig_masks, intensity_image):
         except:
             continue
         
-        y_scan_coords, x_scan_coords = profile._line_profile_coordinates(start_coord, end_coord).squeeze()[:,valid_idx]
+        line_profile_coords = profile._line_profile_coordinates(start_coord, end_coord).squeeze()
+        y_scan_coords, x_scan_coords = line_profile_coords[:,valid_idx]
         idx_closest_to_mid = np.argmin( (x_scan_coords-x_mid)**2 + (y_scan_coords-y_mid)**2 )
         peaks = find_peaks(avg_intensity_profile_lowpass, prominence=5)[0]
         troughs = find_peaks(-avg_intensity_profile_lowpass, prominence=5)[0]
-    
-        # print(peaks, troughs)
     
         merge = False
         
