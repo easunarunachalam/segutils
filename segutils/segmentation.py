@@ -176,7 +176,7 @@ def cell_thickness_from_otsu(im, seg, sigma=5):
     
     thickness = np.sum(im_binary, axis=0)
     
-    return im_blur_xy, thickness, np.multiply(thickness, is_cell)
+    return im_binary, thickness, np.multiply(thickness, is_cell)
 
 def cell_thickness(im, seg, sigma=5, bg_thresh=10):
     is_cell = seg > 0
@@ -301,29 +301,6 @@ def gaussian_blur_seg_mask(img_yx, sigma=3, preserve_range=False, threshold=0):
     blur = gaussian(img_yx, sigma=sigma, preserve_range=preserve_range)
     use_px = blur > threshold
     return use_px
-
-def get_bounding_box(X, buffer=1):
-    """ Calculates the bounding box of a ndarray"""
-    X_shape = X.shape
-    x_shape = tuple([i+2 for i in X_shape])
-
-    x = np.zeros(x_shape)
-    x[1:-1,1:-1] = X
-
-    mask = x == 0
-    bbox = []
-    all_axis = np.arange(x.ndim)
-    for kdim in all_axis:
-        nk_dim = np.delete(all_axis, kdim)
-        mask_i = mask.all(axis=tuple(nk_dim))
-        dmask_i = np.diff(mask_i)
-        idx_i = np.nonzero(dmask_i)[0]
-        if len(idx_i) != 2:
-            print(idx_i)
-            raise ValueError('Algorithm failed, {} does not have 2 elements!'.format(idx_i))
-        bbox.append(slice(idx_i[0]-buffer, idx_i[1]+buffer))
-        # bbox.append(slice(idx_i[0]+1-buffer, idx_i[1]+1+buffer))
-    return tuple(bbox)
 
 def plot_contours(
         contour_image,
