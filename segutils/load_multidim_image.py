@@ -7,7 +7,7 @@ import io
 import xarray as xr
 from IPython.display import display
 
-def load_multi_zpitch_image(img_fns, channels=None, dtype=np.uint16, squeeze=True, compute=True):
+def load_multi_zpitch_image(img_fns, channel_info=None, dtype=np.uint16, squeeze=True, compute=True, addl_metadata={}):
     """
     Load multidimensional images (names in the list `img_fns`) even if ImageJ
     metadata is unavailable, such as when a BeanShell script is used to
@@ -15,10 +15,11 @@ def load_multi_zpitch_image(img_fns, channels=None, dtype=np.uint16, squeeze=Tru
 
     """
 
-    n_channels = len(channels)
-    n_slices_each_channel = np.zeros(n_channels, dtype=int)
-    for ichannel, channel in enumerate(channels):
-        n_slices_each_channel[ichannel] = channel[1]
+    assert isinstance(channel_info, dict)
+
+    channel_names = channel_info.keys()
+    n_channels = len(channel_names)
+    n_slices_each_channel = [channel_info[key] for key in channel_names]
 
     need_to_manually_reshape = False
     
@@ -59,7 +60,7 @@ def load_multi_zpitch_image(img_fns, channels=None, dtype=np.uint16, squeeze=Tru
 
         # split image into separate arrays for each channel
         im_sepchannels = []
-        for ichannel in range(len(channels)):
+        for ichannel in range(len(channel_names)):
             im_ichannel = im.sel(Z=slice(cum_n_slices[ichannel], cum_n_slices[ichannel+1]))
             im_sepchannels.append(im_ichannel)
 
@@ -68,7 +69,7 @@ def load_multi_zpitch_image(img_fns, channels=None, dtype=np.uint16, squeeze=Tru
         # split image into separate arrays for each channel
         im_sepchannels = []
         max_zslices = np.max(n_slices_each_channel)
-        for ichannel in range(len(channels)):
+        for ichannel in range(len(channel_names)):
             if n_slices_each_channel[ichannel] < max_zslices:
                 if n_slices_each_channel[ichannel] == 1:
                     use_z = slice(None,None,None)
@@ -80,19 +81,22 @@ def load_multi_zpitch_image(img_fns, channels=None, dtype=np.uint16, squeeze=Tru
                 
             im_sepchannels.append(im.isel(C=ichannel, Z=use_z))
 
-    # add z coordinate values
+    # add additional metadata
     for ichannel in range(len(im_sepchannels)):
-        if len(channels[ichannel]) == 3:
-            im_sepchannels[ichannel]["Z"] = channels[ichannel][2]
+        im_sepchannels[ichannel] = im_sepchannels[ichannel].assign_attrs(addl_metadata)
+
+    # # add z coordinate values
+    # for ichannel in range(len(im_sepchannels)):
+    #     if len(channels[ichannel]) == 3:
+    #         im_sepchannels[ichannel]["Z"] = np.arange()
 
     if squeeze:
-        for i in range(len(im_sepchannels)):
-            im_sepchannels[i] = im_sepchannels[i].squeeze()    
+        for ichannel in range(len(im_sepchannels)):
+            im_sepchannels[ichannel] = im_sepchannels[ichannel].squeeze()    
 
     if compute:
-        for i in range(len(im_sepchannels)):
-            # if isinstance(im_sepchannels[i], xr.DataArray):
-            im_sepchannels[i] = im_sepchannels[i].compute()
+        for ichannel in range(len(im_sepchannels)):
+            im_sepchannels[ichannel] = im_sepchannels[ichannel].compute()
 
     return im_sepchannels
 
@@ -101,9 +105,9 @@ def clean_attrs(data_array):
     """
     Remove "unprocessed" attribute from MicroManager-generated data.
     """
-    # Remove the 'unprocessed' attribute
-    if 'unprocessed' in data_array.attrs:
-        del data_array.attrs['unprocessed']
+    # Remove the "unprocessed" attribute
+    if "unprocessed" in data_array.attrs:
+        del data_array.attrs["unprocessed"]
 
 def save_sep_channels(imgs, img_fns):
     """
