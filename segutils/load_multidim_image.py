@@ -41,7 +41,8 @@ def load_multi_zpitch_image(img_fns, channel_info=None, dtype=np.uint16, squeeze
             ims.append(im)
         else:
             im = im.xarray_dask_data.astype(dtype)
-            break
+            ims.append(im)
+            # break
 
     if need_to_manually_reshape:
 
